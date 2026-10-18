@@ -16,7 +16,7 @@ upload_dir = project_root / "data" / "uploads"
 upload_dir.mkdir(parents=True, exist_ok=True)
 
 # 当前练习允许单个文件最大为 10 MiB，即 10485760 字节。
-MAX_FILE_SIZE = 10 
+MAX_FILE_SIZE = 10 * 1024 * 1024
 
 
 @app.get("/health")
