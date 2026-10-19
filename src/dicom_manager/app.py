@@ -1,7 +1,9 @@
 from pathlib import Path  # 处理文件和文件夹路径
 from uuid import uuid4  # 生成随机标识，作为服务器保存文件时的名字
 
-from fastapi import FastAPI, HTTPException, UploadFile  # 应用、错误响应和上传文件
+from fastapi import FastAPI, HTTPException, UploadFile
+import pydicom
+from pydicom.errors import InvalidDicomError
 
 
 app = FastAPI(title="DICOM Image Manager")
@@ -40,6 +42,24 @@ def upload_file(file: UploadFile):
             status_code=413,
             detail="文件超过大小限制，未保存",
         )
+
+    if size_bytes == 0:
+        raise HTTPException(
+            status_code=400,
+            detail="文件为空，未保存",
+        )
+    file.file.seek(0)
+
+    try:
+        ds = pydicom.dcmread(file.file, stop_before_pixels=True)
+    except InvalidDicomError:
+        raise HTTPException(
+            status_code=400,
+            detail="不是可读取的DICOM文件,未保存",
+        )
+
+    if not ds.get("Modality") or ds.get("Rows") is None or ds.get("Columns") is None:
+        raise HTTPException(status_code=400, detail="缺少必要的影像字段，未保存")
 
     # 由服务器生成随机标识，不使用上传者提供的文件名拼接路径。
     file_id = uuid4().hex
