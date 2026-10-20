@@ -100,12 +100,24 @@ def upload_file(file: UploadFile):
             stored_filename=stored_filename,
             size_bytes=size_bytes,
         )
+    except sqlite3.IntegrityError as exc:
+        # 数据库拒绝登记时，清理本次新建的文件。
+        if saved_file_created:
+            saved_path.unlink(missing_ok=True)
+
+        # 只有 SOP UID 重复才返回 409；其他完整性错误仍返回 500。
+        if "images.sop_instance_uid" in str(exc):
+            raise HTTPException(
+                status_code=409,
+                detail="相同 SOP Instance UID 的影像已存在",
+            ) from exc
+        raise HTTPException(status_code=500, detail="保存或登记失败") from exc
+
     except (OSError, sqlite3.Error) as exc:
-        # 保存或登记失败时，只清理本次新建的这个文件。
+        # 文件保存失败或其他数据库错误，仍按原逻辑处理。
         if saved_file_created:
             saved_path.unlink(missing_ok=True)
         raise HTTPException(status_code=500, detail="保存或登记失败") from exc
-
     # 将文件信息交给 FastAPI，转换成 JSON 返回给浏览器。
     return {
         "id": file_id,

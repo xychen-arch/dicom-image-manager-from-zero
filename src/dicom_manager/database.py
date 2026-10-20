@@ -21,6 +21,16 @@ def init_db():
             )
         """)
 
+        # 让数据库拒绝重复的、非空的 SOP Instance UID。
+        # IF NOT EXISTS 允许应用重启时再次执行初始化。
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_images_sop_instance_uid
+            ON images(sop_instance_uid)
+            WHERE sop_instance_uid IS NOT NULL
+            """
+        )
+
         conn.commit()
     finally:
         conn.close()
