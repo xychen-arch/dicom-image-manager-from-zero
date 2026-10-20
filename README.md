@@ -44,7 +44,7 @@ data/samples/CT_small.dcm 使用 pydicom 自带的公开示例文件。
 
 - 扫描 DICOM 文件
 - 读取必要的技术元数据
-- 保存元数据并支持查询
+- 处理重复导入
 
 ## 当前功能
 
@@ -53,3 +53,6 @@ data/samples/CT_small.dcm 使用 pydicom 自带的公开示例文件。
 - 返回文件 ID、原始文件名、保存文件名和实际字节数
 - 当前保存上限为 10 MiB，超限返回 413
 - 上传前读取 DICOM 并检查 Modality、Rows、Columns；空文件、无法读取或缺少必要字段返回 400，且不保存
+- 上传成功后将 DICOM 技术信息登记到 SQLite；文件保存和登记都成功才返回 201
+- GET /images 返回影像列表，可按 modality 筛选；无匹配记录返回 200 和 []
+- GET /images/{file_id} 返回单条详情；ID 不存在时返回 404

@@ -5,8 +5,19 @@ from fastapi import FastAPI, HTTPException, UploadFile
 import pydicom
 from pydicom.errors import InvalidDicomError
 
+import sqlite3  # 捕获数据库写入错误
+# 导入建表、写入、列表查询和单条查询函数。
+from dicom_manager.database import (
+    init_db,
+    save_image_record,
+    list_image_records,
+    get_image_record,
+)
+
 
 app = FastAPI(title="DICOM Image Manager")
+# 启动应用时确保 images 表存在。
+init_db()
 
 # 从当前 app.py 的位置，找到项目根目录。
 project_root = Path(__file__).resolve().parents[2]
@@ -70,10 +81,30 @@ def upload_file(file: UploadFile):
     # 保存路径只由固定目录和服务器生成的名字组成。
     saved_path = upload_dir / stored_filename
 
-    # x 表示新建文件，重名时会报错；b 表示以二进制方式写入。
-    # with 代码块结束后，会自动关闭保存文件的句柄。
-    with saved_path.open("xb") as output_file:
-        output_file.write(content)
+    # 记录本次是否真的新建了文件，避免出错时误删已有文件。
+    saved_file_created = False
+
+    try:
+        # 先保存文件本体。
+        with saved_path.open("xb") as output_file:
+            saved_file_created = True
+            output_file.write(content)
+
+        # 再把这次上传的信息登记到 SQLite。
+        save_image_record(
+            file_id=file_id,
+            sop_instance_uid=str(ds.SOPInstanceUID) if ds.get("SOPInstanceUID") else None,
+            modality=str(ds.Modality),
+            rows=int(ds.Rows),
+            columns=int(ds.Columns),
+            stored_filename=stored_filename,
+            size_bytes=size_bytes,
+        )
+    except (OSError, sqlite3.Error) as exc:
+        # 保存或登记失败时，只清理本次新建的这个文件。
+        if saved_file_created:
+            saved_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=500, detail="保存或登记失败") from exc
 
     # 将文件信息交给 FastAPI，转换成 JSON 返回给浏览器。
     return {
@@ -82,3 +113,22 @@ def upload_file(file: UploadFile):
         "stored_filename": stored_filename,
         "size_bytes": size_bytes,
     }
+
+@app.get("/images")
+def list_images(modality: str | None = None):
+    # URL 中没有 modality 时查全部；有值时按该类型筛选。
+    # 查询不到记录时，数据库函数返回空列表 []，接口正常返回 200。
+    return list_image_records(modality)
+
+
+@app.get("/images/{file_id}")
+def image_detail(file_id: str):
+    # 从 URL 路径取出 ID，查询对应的一条记录。
+    image = get_image_record(file_id)
+
+    # 只有按 ID 查详情且记录不存在时，才返回 404。
+    if image is None:
+        raise HTTPException(status_code=404, detail="影像不存在")
+
+    # 找到记录时，把字典作为 JSON 返回。
+    return image
