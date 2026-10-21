@@ -1,4 +1,3 @@
-from pathlib import Path  # 处理文件和文件夹路径
 from uuid import uuid4  # 生成随机标识，作为服务器保存文件时的名字
 
 from fastapi import FastAPI, HTTPException, UploadFile
@@ -7,7 +6,9 @@ from pydicom.errors import InvalidDicomError
 
 import sqlite3  # 捕获数据库写入错误
 # 导入建表、写入、列表查询和单条查询函数。
+# 数据库和上传文件共用同一个数据目录。
 from dicom_manager.database import (
+    data_dir,
     init_db,
     save_image_record,
     list_image_records,
@@ -19,11 +20,8 @@ app = FastAPI(title="DICOM Image Manager")
 # 启动应用时确保 images 表存在。
 init_db()
 
-# 从当前 app.py 的位置，找到项目根目录。
-project_root = Path(__file__).resolve().parents[2]
-
-# 所有上传文件都保存在项目自己的 data/uploads 中。
-upload_dir = project_root / "data" / "uploads"
+# 上传文件保存在与数据库相同的数据目录下。
+upload_dir = data_dir / "uploads"
 
 # 文件夹不存在时创建；已经存在时正常继续。
 upload_dir.mkdir(parents=True, exist_ok=True)

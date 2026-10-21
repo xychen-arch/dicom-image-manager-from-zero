@@ -1,10 +1,15 @@
+import os  # 读取测试运行时指定的数据目录
 import sqlite3
 from pathlib import Path
 
+# 未指定测试目录时，继续使用项目原有的 data 目录。
 project_root = Path(__file__).resolve().parents[2]
-db_path = project_root / "data" / "images.sqlite3"
+data_dir = Path(os.environ.get("DICOM_DATA_DIR", str(project_root / "data")))
+db_path = data_dir / "images.sqlite3"
 
 def init_db():
+    # 测试目录可能是新目录，先创建它再连接数据库。
+    data_dir.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path)
 
     try:

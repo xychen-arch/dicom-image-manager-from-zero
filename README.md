@@ -1,58 +1,151 @@
 # DICOM Image Manager
 
-## 项目目标
+## 项目简介
 
-练习使用 Python 管理 DICOM 医学影像文件，并学习读取文件中的技术元数据。
+这是一个用于学习 Python、FastAPI、pydicom 和 SQLite 的 DICOM 影像管理后端。
 
-## 当前进度
+项目可以接收 DICOM 文件，校验文件大小和必要影像字段，保存文件本体，并将技术元数据登记到 SQLite。项目还提供影像列表、类型筛选、详情查询和重复影像检测接口。
 
-- 已创建 Python 入口文件，并能在项目虚拟环境中运行。
-- 已创建项目目录和 Python 虚拟环境
-- 程序可以读取 `data/samples/hello.txt`
-- 程序可以列出 `data/samples` 中的文件
-- 10.17
-- 可读取公开 DICOM 样本的 Modality、Rows、Columns
-- 可提示文件不存在、无法按 DICOM 格式读取两种错误
-- 已建立 FastAPI 服务，GET /health 可返回状态信息
-- 可通过 /docs 页面调用接口
+本项目仅用于编程学习，不用于临床诊断或医疗决策。
+
+## 当前功能
+
+- `GET /health`：检查服务是否正常运行
+- `POST /upload`：上传并保存 DICOM 文件
+- `GET /images`：查询影像列表，可使用 `modality` 参数筛选
+- `GET /images/{file_id}`：按服务器生成的 ID 查询单条影像详情
+- 单个上传文件最大为 10 MiB，超限返回 `413`
+- 空文件、无法解析的文件或缺少必要影像字段时返回 `400`
+- 上传前使用 pydicom 读取 DICOM，并检查 `Modality`、`Rows`、`Columns`
+- 文件本体使用服务器生成的随机名称保存到 `data/uploads`
+- 技术元数据保存到 SQLite 数据库 `data/images.sqlite3`
+- 文件保存和数据库登记都成功后才返回 `201`
+- 非空的 SOP Instance UID 具有唯一约束，重复上传返回 `409`
+- 数据库登记失败或重复冲突时，只清理本次新建的文件
+- 查询不到影像详情时返回 `404`
+- 查询列表没有匹配记录时返回 `200` 和空列表 `[]`
+- 可以通过 `DICOM_DATA_DIR` 指定独立数据目录，用于隔离自动化测试
+
+## 保存的数据
+
+上传成功后，SQLite 会记录以下技术信息：
+
+- 服务器生成的影像 ID
+- SOP Instance UID
+- Modality
+- Rows
+- Columns
+- 服务器保存文件名
+- 文件字节数
+- 创建时间
+
+项目不使用患者姓名作为文件名或主键。
 
 ## 样本来源
 
-data/samples/CT_small.dcm 使用 pydicom 自带的公开示例文件。
-项目仅用于学习，不用于临床诊断。
+`data/samples/CT_small.dcm` 使用 pydicom 自带的公开测试样本。
 
-## 运行 DICOM 信息读取脚本
+项目中的样本和接口仅用于软件开发学习，不代表完整的临床 DICOM 支持范围。
+
+## 安装依赖
 
 在项目根目录执行：
 
-    .\.venv\Scripts\python.exe .\src\dicom_manager\inspect_dicom.py
+只运行项目时安装：
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+需要运行自动化测试时安装：
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+```
+
+运行项目需要：
+
+- FastAPI
+- Uvicorn
+- python-multipart
+- pydicom
+
+运行自动化测试还需要：
+
+- pytest
+- httpx
 
 ## 启动 API 服务
 
 在项目根目录执行：
 
-    .\.venv\Scripts\python.exe -m pip install fastapi uvicorn python-multipart pydicom
-    .\.venv\Scripts\python.exe -m uvicorn dicom_manager.app:app --app-dir src --reload
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn dicom_manager.app:app --app-dir src --reload
+```
 
-健康检查：http://127.0.0.1:8000/health
+启动后可以访问：
 
-接口文档：http://127.0.0.1:8000/docs
+- 健康检查：http://127.0.0.1:8000/health
+- Swagger 接口文档：http://127.0.0.1:8000/docs
 
-停止服务：在运行服务的终端按 Ctrl+C。
+停止服务时，在运行服务的终端中按 `Ctrl+C`。
 
-## 计划功能
+## 接口响应
 
-- 扫描 DICOM 文件
-- 读取必要的技术元数据
-- 处理重复导入
+| 场景 | HTTP 状态码 |
+| --- | ---: |
+| 有效 DICOM 上传成功 | 201 |
+| 普通文本、空文件或缺少必要字段 | 400 |
+| 重复的非空 SOP Instance UID | 409 |
+| 文件超过 10 MiB | 413 |
+| 查询不存在的影像 ID | 404 |
+| 文件或数据库处理失败 | 500 |
 
-## 当前功能
+## 运行自动化测试
 
-- POST /upload 可接收并保存单个小文件
-- 服务器生成保存文件名，上传内容存入 data/uploads
-- 返回文件 ID、原始文件名、保存文件名和实际字节数
-- 当前保存上限为 10 MiB，超限返回 413
-- 上传前读取 DICOM 并检查 Modality、Rows、Columns；空文件、无法读取或缺少必要字段返回 400，且不保存
-- 上传成功后将 DICOM 技术信息登记到 SQLite；文件保存和登记都成功才返回 201
-- GET /images 返回影像列表，可按 modality 筛选；无匹配记录返回 200 和 []
-- GET /images/{file_id} 返回单条详情；ID 不存在时返回 404
+自动化测试使用独立的数据库和上传目录，不会修改真实的 `data/images.sqlite3` 和 `data/uploads`。
+
+测试数据保存在 `D:\Codex\求职\dicom-image-manager-test-runs` 下每次运行生成的唯一目录中。
+
+在项目根目录执行：
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -p no:cacheprovider
+```
+
+当前自动化测试覆盖：
+
+- 新 DICOM 首次上传返回 `201`
+- 相同 SOP Instance UID 再次上传返回 `409`
+- 重复上传不增加数据库记录或磁盘文件
+- 普通文本、空文件和缺少 `Rows` 返回 `400`
+- 超限文件返回 `413`
+- 未知影像 ID 返回 `404`
+- 缺少 SOP Instance UID 的当前接收规则
+- 数据库登记失败时返回 `500`，并清理本次新建的文件
+
+最近一次本地运行结果为：
+
+```text
+8 passed, 2 warnings
+```
+
+警告内容仍待后续整理，不将其记录为无警告通过。
+
+## 运行 DICOM 信息读取脚本
+
+在项目根目录执行：
+
+```powershell
+.\.venv\Scripts\python.exe .\src\dicom_manager\inspect_dicom.py
+```
+
+## 已知限制
+
+- 项目仅用于学习，不用于临床诊断
+- 当前只检查少量必要的 DICOM 技术字段
+- 缺少 SOP Instance UID 的文件仍允许上传，无法按 UID 判断重复
+- 当前尚未实现基于 SHA-256 的完全相同文件去重
+- 当前没有影像预览和文件下载接口
+- 当前没有用户认证、权限控制和完整的医疗工作流
+- 当前测试环境仍报告两条警告，尚待确认并处理
