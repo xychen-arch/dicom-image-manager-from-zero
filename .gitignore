@@ -5,3 +5,5 @@ data/uploads/
 *.db
 *.sqlite
 *.sqlite3
+data/samples/empty.dcm
+data/samples/missing_rows.dcm

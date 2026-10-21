@@ -43,6 +43,8 @@
 
 项目不使用患者姓名作为文件名或主键。
 
+上传文件的原始内容仍会保存在本机。公开仓库中只放可公开的测试样本，不要提交真实患者影像、数据库或 `data/uploads` 中的文件。
+
 ## 样本来源
 
 `data/samples/CT_small.dcm` 使用 pydicom 自带的公开测试样本。
@@ -53,15 +55,21 @@
 
 在项目根目录执行：
 
+首次使用时先创建虚拟环境：
+
+```cmd
+python -m venv .venv
+```
+
 只运行项目时安装：
 
-```powershell
+```cmd
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
 需要运行自动化测试时安装：
 
-```powershell
+```cmd
 .\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
 ```
 
@@ -81,7 +89,7 @@
 
 在项目根目录执行：
 
-```powershell
+```cmd
 .\.venv\Scripts\python.exe -m uvicorn dicom_manager.app:app --app-dir src --reload
 ```
 
@@ -108,11 +116,11 @@
 
 自动化测试使用独立的数据库和上传目录，不会修改真实的 `data/images.sqlite3` 和 `data/uploads`。
 
-测试数据保存在 `D:\Codex\求职\dicom-image-manager-test-runs` 下每次运行生成的唯一目录中。
+测试数据保存在项目目录旁的 `dicom-image-manager-test-runs` 文件夹中，每次运行会新建唯一目录。
 
 在项目根目录执行：
 
-```powershell
+```cmd
 .\.venv\Scripts\python.exe -m pytest -p no:cacheprovider
 ```
 
@@ -142,7 +150,7 @@ TestClient 对当前 httpx 用法的弃用提醒；当前测试均已通过。
 
 在项目根目录执行：
 
-```powershell
+```cmd
 .\.venv\Scripts\python.exe .\src\dicom_manager\inspect_dicom.py
 ```
 
