@@ -1,14 +1,16 @@
+import hashlib
+import sqlite3  # 捕获数据库写入错误
 from uuid import uuid4  # 生成随机标识，作为服务器保存文件时的名字
 
 from fastapi import FastAPI, HTTPException, UploadFile
 import pydicom
 from pydicom.errors import InvalidDicomError
 
-import sqlite3  # 捕获数据库写入错误
 # 导入建表、写入、列表查询和单条查询函数。
 # 数据库和上传文件共用同一个数据目录。
 from dicom_manager.database import (
     data_dir,
+    get_image_record_by_content_sha256,
     init_db,
     save_image_record,
     list_image_records,
@@ -70,6 +72,18 @@ def upload_file(file: UploadFile):
     if not ds.get("Modality") or ds.get("Rows") is None or ds.get("Columns") is None:
         raise HTTPException(status_code=400, detail="缺少必要的影像字段，未保存")
 
+    # 哈希由服务器根据实际收到的字节计算，不信任客户端文件名或声明值。
+    content_sha256 = hashlib.sha256(content).hexdigest()
+
+    try:
+        existing_image = get_image_record_by_content_sha256(content_sha256)
+    except sqlite3.Error as exc:
+        raise HTTPException(status_code=500, detail="保存或登记失败") from exc
+
+    # 顺序重复上传在写文件前拒绝，避免产生需要清理的新副本。
+    if existing_image is not None:
+        raise HTTPException(status_code=409, detail="相同文件内容已存在")
+
     # 由服务器生成随机标识，不使用上传者提供的文件名拼接路径。
     file_id = uuid4().hex
 
@@ -92,6 +106,7 @@ def upload_file(file: UploadFile):
         save_image_record(
             file_id=file_id,
             sop_instance_uid=str(ds.SOPInstanceUID) if ds.get("SOPInstanceUID") else None,
+            content_sha256=content_sha256,
             modality=str(ds.Modality),
             rows=int(ds.Rows),
             columns=int(ds.Columns),
@@ -103,7 +118,14 @@ def upload_file(file: UploadFile):
         if saved_file_created:
             saved_path.unlink(missing_ok=True)
 
-        # 只有 SOP UID 重复才返回 409；其他完整性错误仍返回 500。
+        # 并发请求可能同时通过预查询，最终由数据库唯一索引拒绝重复内容。
+        if "images.content_sha256" in str(exc):
+            raise HTTPException(
+                status_code=409,
+                detail="相同文件内容已存在",
+            ) from exc
+
+        # 字节不同但 SOP UID 相同的影像仍由 UID 唯一约束拒绝。
         if "images.sop_instance_uid" in str(exc):
             raise HTTPException(
                 status_code=409,

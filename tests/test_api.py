@@ -1,3 +1,4 @@
+import hashlib
 import importlib
 import io
 import os
@@ -79,10 +80,36 @@ def test_new_upload_then_duplicate_returns_409(isolated_client):
     assert (case_dir / "uploads" / stored_name).read_bytes() == ct_bytes
     assert saved_state(case_dir) == (1, {stored_name})
 
-    # 同一文件第二次上传被拒绝，文件和记录均不增加。
-    second = upload(client, "CT_small.dcm", ct_bytes)
+    # 数据库保存的是服务器根据实际文件字节计算出的 SHA-256。
+    with sqlite3.connect(case_dir / "images.sqlite3") as conn:
+        saved_hash = conn.execute(
+            "SELECT content_sha256 FROM images"
+        ).fetchone()[0]
+    assert saved_hash == hashlib.sha256(ct_bytes).hexdigest()
+
+    # 即使修改客户端文件名，相同字节第二次上传仍被拒绝。
+    second = upload(client, "renamed_CT.dcm", ct_bytes)
     assert second.status_code == 409
     assert saved_state(case_dir) == (1, {stored_name})
+
+
+def test_same_uid_with_different_bytes_returns_409(isolated_client):
+    client, case_dir = isolated_client
+
+    # 修改非身份字段，使文件字节变化，但保留原 SOP Instance UID。
+    dataset = pydicom.dcmread(io.BytesIO(ct_bytes))
+    dataset.PatientName = "Changed^Name"
+    output = io.BytesIO()
+    pydicom.dcmwrite(output, dataset)
+    changed_bytes = output.getvalue()
+    assert changed_bytes != ct_bytes
+
+    first = upload(client, "original.dcm", ct_bytes)
+    second = upload(client, "changed.dcm", changed_bytes)
+
+    assert first.status_code == 201
+    assert second.status_code == 409
+    assert saved_state(case_dir) == (1, {first.json()["stored_filename"]})
 
 
 @pytest.mark.parametrize("kind", ["text", "empty", "missing_rows"])
@@ -122,16 +149,39 @@ def test_unknown_id_returns_404(isolated_client):
     assert saved_state(case_dir) == (0, set())
 
 
-def test_missing_uid_is_accepted_twice(isolated_client):
+def test_same_content_without_uid_returns_409(isolated_client):
     client, case_dir = isolated_client
     content = dicom_without("SOPInstanceUID")
 
-    # 当前规则允许缺 UID；无法按 UID 判断重复，因此两次均成功。
-    assert upload(client, "no-uid.dcm", content).status_code == 201
-    assert upload(client, "no-uid.dcm", content).status_code == 201
-    record_count, filenames = saved_state(case_dir)
-    assert record_count == 2
-    assert len(filenames) == 2
+    # 缺少 UID 仍可首次接收，但相同字节由 SHA-256 阻止重复保存。
+    first = upload(client, "no-uid.dcm", content)
+    second = upload(client, "renamed-no-uid.dcm", content)
+    assert first.status_code == 201
+    assert second.status_code == 409
+    assert saved_state(case_dir) == (1, {first.json()["stored_filename"]})
+
+
+def test_hash_integrity_error_cleans_new_file(isolated_client, monkeypatch):
+    client, case_dir = isolated_client
+
+    # 模拟两个并发请求都未在预查询阶段发现重复。
+    monkeypatch.setattr(
+        app_module,
+        "get_image_record_by_content_sha256",
+        lambda _content_sha256: None,
+    )
+
+    # 模拟数据库唯一索引在插入时发现内容哈希冲突。
+    def raise_hash_conflict(**_kwargs):
+        raise sqlite3.IntegrityError(
+            "UNIQUE constraint failed: images.content_sha256"
+        )
+
+    monkeypatch.setattr(app_module, "save_image_record", raise_hash_conflict)
+    response = upload(client, "CT_small.dcm", ct_bytes)
+
+    assert response.status_code == 409
+    assert saved_state(case_dir) == (0, set())
 
 
 def test_database_error_cleans_new_file(isolated_client, monkeypatch):
